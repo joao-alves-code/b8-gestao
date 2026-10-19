@@ -1,60 +1,47 @@
-# Conversor B8 – Cadastro central Google Sheets (versão 1.2)
+# Conversor B8 — MVP sem login Google (v1.2.1)
 
-## Estrutura
+## O que mudou
 
-- `public/index.html`: interface do wizard. Borderôs, extratos e recompras são processados no navegador.
-- `netlify/functions/fornecedores.mjs`: endpoint autenticado no próprio domínio Netlify. Verifica identidade Google do usuário antes de permitir leitura/gravação.
-- `apps-script/Code.gs`: backend Apps Script vinculado ao Google Sheets, com auditoria de inclusão/alteração e bloqueio de conflitos de CNPJ.
-- `netlify.toml`: configura site estático e função serverless.
+- Removido o login Google e a lista de e-mails autorizados.
+- Qualquer visitante com acesso ao site pode consultar, cadastrar e importar fornecedores.
+- Os dados cadastrais (código, nome e CNPJ) continuam persistidos no Google Sheets.
+- A integração continua protegida contra chamadas **diretas** ao Apps Script pela chave compartilhada servidor-servidor. **Isso NÃO impede que visitantes utilizem a função pública do Netlify.**
+- O Google Sheets mantém as abas `Fornecedores` e `Auditoria`; o autor registrado será `MVP - acesso público`, pois não há identificação individual.
+- O wizard mensal continua sem necessidade de anexar a relação de fornecedores; a atualização pelo PDF WBA fica no menu lateral.
 
-**Não basta publicar somente `index.html` para salvar no Google Sheets.** O site precisa ser implantado como projeto Netlify completo, com a função e as variáveis de ambiente.
+## 1. Google Sheets + Apps Script
 
-## 1. Criar a planilha
+1. Crie uma planilha Google `B8 - Cadastro de Fornecedores`.
+2. Na planilha, abra **Extensões > Apps Script**. Cole o arquivo `apps-script/Code.gs`.
+3. Em **Configurações do projeto > Propriedades do script**, adicione a propriedade `B8_SHARED_SECRET` com uma chave longa e aleatória.
+4. Execute `setupCadastro()` uma vez e autorize o script. Serão criadas `Fornecedores` e `Auditoria`.
+5. Em **Implantar > Nova implantação > App da Web**, selecione `Executar como: Eu` e `Quem tem acesso: Qualquer pessoa`. Copie a URL terminada em `/exec`.
+6. Se já tinha o Apps Script antigo publicado, **atualize também o código e crie uma nova versão da implantação**, para eliminar a exigência anterior de e-mail.
 
-Crie uma planilha privada no Google Sheets chamada, por exemplo, `B8 - Cadastro de Cedentes`. No menu **Extensões > Apps Script**, cole o conteúdo de `apps-script/Code.gs` no arquivo `Code.gs`. O script utiliza a planilha à qual está vinculado: não há necessidade de colar o ID da planilha no HTML.
+## 2. Netlify — apenas duas variáveis
 
-Em **Configurações do projeto > Propriedades do script**, crie uma propriedade chamada `B8_SHARED_SECRET` com uma chave longa e aleatória. Essa mesma chave será cadastrada em `B8_APPS_SCRIPT_SECRET` no Netlify. Não coloque essa chave no HTML ou no GitHub.
+Envie o projeto completo ao Netlify via GitHub (não somente `index.html`). `netlify.toml` configura `public/` e `netlify/functions/`.
 
-Execute manualmente `setupCadastro()` uma única vez e aceite as permissões solicitadas. Ela cria duas abas: `Fornecedores` (codigo, nome, cnpj, atualizado_em, atualizado_por, origem) e `Auditoria` (histórico de alterações).
+| Variável | Valor | Secreta |
+|---|---|---|
+| `B8_APPS_SCRIPT_URL` | URL do Apps Script finalizada em `/exec` | Opcional |
+| `B8_APPS_SCRIPT_SECRET` | A **mesma** chave de `B8_SHARED_SECRET` | **Sim** |
 
-Depois faça **Implantar > Nova implantação > App da Web**, com **Executar como: Eu** e **Quem tem acesso: Qualquer pessoa**. Copie a URL que termina em `/exec` (não use a URL `/dev`). O Apps Script recebe chamadas via POST **somente do backend do Netlify**, verificando o segredo em cada chamada; não a exponha em páginas públicas. A configuração “Qualquer pessoa” é necessária para o endpoint server-to-server sem Google OAuth do proprietário e precisa ser usada com segredo forte, proteção da função e auditoria. Se sua política de TI não permitir esta publicação, use a Google Sheets API com conta de serviço em vez de Apps Script.
+**Remova** `GOOGLE_OAUTH_CLIENT_ID` e `ALLOWED_GOOGLE_EMAILS` se já estiverem cadastradas no Netlify: a aplicação não as usa mais. Realize um novo deploy depois.
 
-## 2. Autenticação Google dos usuários
+## 3. Como testar
 
-No Google Cloud, configure a tela de consentimento OAuth e crie um **Client ID OAuth do tipo Aplicação Web**, destinado ao Google Identity Services. Em **Origens JavaScript autorizadas**, inclua a origem HTTPS real do Netlify (`https://seu-site.netlify.app`, sem caminho) e o domínio próprio se houver.
+1. Abra `https://seu-site.netlify.app/.netlify/functions/fornecedores?action=config`. Deve retornar `ok:true`, `configured:true` e `mode:'public-mvp'`. Não retorna segredo.
+2. Abra o site. A lista de fornecedores será carregada automaticamente, sem login.
+3. No menu **Cadastro de fornecedores**, cadastre um fornecedor de teste com CNPJ válido. Confira as abas `Fornecedores` e `Auditoria`.
+4. Teste uma importação do PDF WBA no menu administrativo. Registros conflitantes não devem sobrescrever CNPJ diferente.
+5. Na etapa 2 do wizard, abra um borderô cujo cedente ainda não tenha CNPJ, cadastre na modal e confirme persistência na planilha e nova consulta ao recarregar o site.
 
-Adicione à variável `ALLOWED_GOOGLE_EMAILS` os endereços Google específicos autorizados, separados por vírgula. Apenas as contas desta lista poderão consultar ou modificar a base. O Netlify verifica o **ID token Google**, a audiência, a assinatura por validação remota no Google e o prazo antes de chamar o Apps Script. Uma conta fora da lista recebe `403`.
+## Cuidados importantes
 
-Observação: o acesso à planilha Google não precisa ser concedido a todos os usuários do conversor. O Apps Script executa como o proprietário autorizado. O proprietário deve proteger a planilha e a implantação. **Não inclua tokens, senhas, client secret ou URLs com segredo no HTML.**
-
-## 3. Netlify
-
-Publique a pasta/projeto completo que contém `netlify.toml`, `public/` e `netlify/functions/`. Preferencialmente conecte ao GitHub e habilite deploy contínuo. O upload por arrastar apenas o `index.html` **não** instala Netlify Functions.
-
-Configure no painel Netlify > *Site configuration > Environment variables*:
-
-| Variável | Valor |
-|---|---|
-| `GOOGLE_OAUTH_CLIENT_ID` | Client ID OAuth público terminado em `.apps.googleusercontent.com` |
-| `ALLOWED_GOOGLE_EMAILS` | Lista exata de contas autorizadas separadas por vírgula |
-| `B8_APPS_SCRIPT_URL` | URL de produção `/exec` obtida no Apps Script |
-| `B8_APPS_SCRIPT_SECRET` | Mesmo segredo da propriedade `B8_SHARED_SECRET` |
-
-Realize um novo deploy após configurar as variáveis. Confirme que `/.netlify/functions/fornecedores?action=config` retorna `configured:true`, **sem expor segredos**. Nunca use essa rota para testar gravações com credenciais falsas.
-
-## 4. Fluxo de usuários
-
-1. Clique **Cadastro de fornecedores**, no menu lateral, e faça login Google com uma conta permitida. O cadastro é consultado do Sheets.
-2. O menu **Atualizar via PDF WBA** funciona fora do wizard. Anexe a relação de fornecedores quando desejar atualizar a base; pré-visualize e confirme. Os registros sem CNPJ válido são ignorados e conflitos entre CNPJs não são sobrescritos.
-3. No wizard mensal, importe **apenas o relatório de aquisições** e, opcionalmente, extratos, WBA e recompras.
-4. Na etapa 2, se o fornecedor estiver sem CNPJ, use **Cadastrar CNPJ**. O formulário já mostra código e nome; forneça o CNPJ, clique salvar e aguarde a confirmação do Google. A operação é recalculada com a informação persistida, sem mudar valores de face/deságio.
-5. Continue a conciliação financeira e exporte o Excel. O cadastro estará disponível nas próximas sessões porque fica na planilha Google.
-
-## 5. Regras e pendências de homologação
-
-- A chave lógica de fornecedor é o `codigo` do WBA; CNPJ precisa conter dígitos verificadores válidos (14 dígitos) para ser salvo.
-- Não grava CNPJ vazio; não exclui fornecedores ausentes em uma importação e não sobrescreve um CNPJ diferente sem revisão fora do wizard.
-- O banco Google Sheets armazena **apenas código, nome, CNPJ e metadados de auditoria**; PDFs financeiros não são enviados.
-- Tokens Google só ficam em memória. O login deve ser renovado após expirar (normalmente uma hora).
-- Houve teste automatizado local de 64 borderôs, 23 PDFs de recompra com 33 títulos e código compilado. A conexão com a planilha Google ainda depende da implantação e não foi testada com credenciais reais.
-- O reconhecimento de extratos Caixa/Bradesco e do relatório WBA ainda apresenta limitações anteriores e não deve ser considerado prova bancária completa; a homologação contábil para importação no ERP também permanece pendente.
+- **Qualquer pessoa que saiba o endereço do site pode modificar o cadastro por meio do endpoint público.** A chave Netlify/Apps Script protege o Apps Script de invocação direta, mas não controla quem chama a função do Netlify.
+- A planilha contém dados cadastrais; mantenha backups e monitore a aba Auditoria. Sem login, não há como atribuir alterações a uma pessoa específica.
+- Quando o MVP for divulgado, adicione autenticação ao cadastro ou restrinja o acesso ao site. Uma chave escondida no JavaScript **não é** uma solução segura.
+- Permanecem limites de 100 registros por chamada, 290 KB por request, validação de CNPJ e prevenção de sobrescrita de CNPJ conflitante. Esses limites não substituem proteção contra uso abusivo ou rate limit na borda.
+- Os PDFs financeiros continuam processados localmente no navegador, mas os cadastros serão consultados por qualquer visitante com acesso à aplicação.
+- A homologação contábil e de leitura dos extratos permanece pendente de testes finais com os documentos de julho.

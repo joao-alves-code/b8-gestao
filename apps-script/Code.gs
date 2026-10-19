@@ -4,14 +4,15 @@
  * Execute setupCadastro() uma vez, após configurar B8_SHARED_SECRET em Propriedades do script.
  * Implantar > Nova implantação > App da Web > Executar como: Eu > Acesso: Qualquer pessoa.
  * A URL /exec e o segredo devem ficar SOMENTE nas variáveis do Netlify, nunca no HTML.
+ * O endpoint Netlify fica público neste MVP: cadastros podem ser alterados por visitantes.
  */
 const SUPPLIERS_SHEET='Fornecedores';
 const AUDIT_SHEET='Auditoria';
 const SUP_HEADERS=['codigo','nome','cnpj','atualizado_em','atualizado_por','origem'];
 const AUDIT_HEADERS=['em','usuario','acao','codigo','nome_anterior','cnpj_anterior','nome_novo','cnpj_novo','origem'];
 function setupCadastro(){const ss=SpreadsheetApp.getActiveSpreadsheet();if(!ss)throw Error('Vincule o script a uma planilha.');let s=ss.getSheetByName(SUPPLIERS_SHEET)||ss.insertSheet(SUPPLIERS_SHEET);if(s.getLastRow()===0)s.appendRow(SUP_HEADERS);let a=ss.getSheetByName(AUDIT_SHEET)||ss.insertSheet(AUDIT_SHEET);if(a.getLastRow()===0)a.appendRow(AUDIT_HEADERS);s.getRange('A:C').setNumberFormat('@');s.setFrozenRows(1);a.setFrozenRows(1);}
-function doPost(e){try{const req=JSON.parse(e.postData?.contents||'{}');const token=PropertiesService.getScriptProperties().getProperty('B8_SHARED_SECRET');if(!token||req.secret!==token)return json_({ok:false,error:'Integração não autorizada.'});if(!['list','upsert','bulk'].includes(req.action))return json_({ok:false,error:'Ação inválida.'});const email=String(req.actor||'').trim().toLowerCase();if(!/^.+@.+\..+$/.test(email))return json_({ok:false,error:'Usuário não informado.'});
-  if(!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SUPPLIERS_SHEET))setupCadastro();const lock=LockService.getScriptLock();if(!lock.tryLock(25000))return json_({ok:false,error:'Cadastro ocupado; tente novamente.'});try{return json_(req.action==='list'?list_():upsert_(req.records,email))}finally{lock.releaseLock()}
+function doPost(e){try{const req=JSON.parse(e.postData?.contents||'{}');const token=PropertiesService.getScriptProperties().getProperty('B8_SHARED_SECRET');if(!token||req.secret!==token)return json_({ok:false,error:'Integração não autorizada.'});if(!['list','upsert','bulk'].includes(req.action))return json_({ok:false,error:'Ação inválida.'});const actor='MVP - acesso público';
+  if(!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SUPPLIERS_SHEET))setupCadastro();const lock=LockService.getScriptLock();if(!lock.tryLock(25000))return json_({ok:false,error:'Cadastro ocupado; tente novamente.'});try{return json_(req.action==='list'?list_():upsert_(req.records,actor))}finally{lock.releaseLock()}
 }catch(err){return json_({ok:false,error:'Erro no cadastro: '+String(err.message||err)})}}
 function json_(obj){return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON)}
 function sheet_(){return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SUPPLIERS_SHEET)}
